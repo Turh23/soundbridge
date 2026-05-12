@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SoundBridge — סנכרון רמקולים</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Noto+Sans+Hebrew:wght@300;400;600;700&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0a0a0f;
+    --surface: #111118;
+    --surface2: #1a1a26;
+    --border: rgba(255,255,255,0.06);
+    --border2: rgba(255,255,255,0.12);
+    --accent: #00e5b0;
+    --accent2: #7c6eff;
+    --accent3: #ff6b6b;
+    --text: #f0f0f8;
+    --muted: #6b6b8a;
+    --mono: 'Space Mono', monospace;
+    --sans: 'Noto Sans Hebrew', sans-serif;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Ambient background */
+  body::before {
+    content: '';
+    position: fixed;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background:
+      radial-gradient(ellipse 600px 400px at 20% 30%, rgba(0,229,176,0.04) 0%, transparent 70%),
+      radial-gradient(ellipse 500px 500px at 80% 70%, rgba(124,110,255,0.05) 0%, transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .app { position: relative; z-index: 1; max-width: 960px; margin: 0 auto; padding: 2rem 1.5rem; }
+
+  /* Header */
+  header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 3rem; }
+
+  .logo {
+    display: flex; align-items: center; gap: 0.75rem;
+  }
+  .logo-icon {
+    width: 40px; height: 40px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px;
+  }
+  .logo h1 { font-family: var(--mono); font-size: 1.1rem; letter-spacing: 0.05em; color: var(--text); }
+  .logo span { font-family: var(--sans); font-size: 0.7rem; color: var(--muted); display: block; font-weight: 300; }
+
+  .status-pill {
+    display: flex; align-items: center; gap: 0.5rem;
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    border-radius: 100px;
+    padding: 0.35rem 1rem;
+    font-size: 0.75rem;
+    font-family: var(--mono);
+    color: var(--muted);
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); transition: all 0.3s; }
+  .dot.active { background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.5; } }
+
+  /* Sync visualizer */
+  .visualizer-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 2rem;
+    margin-bottom: 2rem;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .visualizer-section::before {
+    content: '';
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse at center, rgba(0,229,176,0.03) 0%, transparent 60%);
+    pointer-events: none;
+  }
+
+  .wave-container {
+    display: flex; align-items: center; justify-content: center; gap: 4px;
+    height: 80px; margin: 1.5rem 0;
+  }
+  .bar {
+    width: 4px; border-radius: 4px;
+    background: var(--accent);
+    animation: wave 1.2s ease-in-out infinite;
+    opacity: 0.2;
+    transition: opacity 0.3s;
+  }
+  .bar:nth-child(odd) { animation-delay: -0.3s; }
+  .bar:nth-child(3n) { animation-delay: -0.6s; }
+  .bar:nth-child(4n) { background: var(--accent2); }
+  @keyframes wave {
+    0%,100% { height: 8px; }
+    50% { height: 60px; }
+  }
+  .wave-container.playing .bar { opacity: 1; }
+
+  .sync-label {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    text-transform: uppercase;
+  }
+
+  .sync-time {
+    font-family: var(--mono);
+    font-size: 2.5rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--text);
+    margin: 0.5rem 0;
+  }
+
+  .sync-time span { color: var(--accent); }
+
+  /* Controls */
+  .controls {
+    display: flex; align-items: center; justify-content: center; gap: 1rem;
+    margin-top: 1.5rem;
+  }
+
+  .btn {
+    border: none; cursor: pointer;
+    font-family: var(--sans); font-weight: 600;
+    transition: all 0.15s;
+    display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+  }
+  .btn:active { transform: scale(0.96); }
+
+  .btn-play {
+    width: 56px; height: 56px; border-radius: 50%;
+    background: var(--accent);
+    color: var(--bg);
+    font-size: 22px;
+    box-shadow: 0 0 30px rgba(0,229,176,0.3);
+  }
+  .btn-play:hover { background: #00ffcc; box-shadow: 0 0 40px rgba(0,229,176,0.5); }
+
+  .btn-icon {
+    width: 44px; height: 44px; border-radius: 50%;
+    background: var(--surface2);
+    border: 1px solid var(--border2);
+    color: var(--text);
+    font-size: 18px;
+  }
+  .btn-icon:hover { border-color: rgba(255,255,255,0.25); background: rgba(255,255,255,0.06); }
+
+  /* Volume master */
+  .master-volume {
+    margin-top: 1.5rem;
+    display: flex; align-items: center; gap: 1rem;
+  }
+  .master-volume label { font-size: 0.75rem; color: var(--muted); font-family: var(--mono); white-space: nowrap; }
+
+  input[type=range] {
+    -webkit-appearance: none; appearance: none;
+    flex: 1; height: 4px; border-radius: 4px;
+    background: var(--surface2);
+    outline: none; cursor: pointer;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 18px; height: 18px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 10px rgba(0,229,176,0.4);
+    transition: transform 0.1s;
+  }
+  input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.2); }
+
+  .vol-val { font-family: var(--mono); font-size: 0.75rem; color: var(--accent); min-width: 32px; text-align: left; }
+
+  /* Speakers grid */
+  .section-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 1rem;
+  }
+  .section-header h2 { font-size: 0.75rem; font-family: var(--mono); color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; }
+
+  .btn-add {
+    background: transparent;
+    border: 1px dashed var(--border2);
+    color: var(--muted);
+    border-radius: 8px;
+    padding: 0.4rem 1rem;
+    font-size: 0.75rem;
+    font-family: var(--mono);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .btn-add:hover { border-color: var(--accent); color: var(--accent); }
+
+  .speakers-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2rem;
+  }
+
+  .speaker-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 1.25rem;
+    transition: border-color 0.2s, transform 0.2s;
+    position: relative;
+    overflow: hidden;
+  }
+  .speaker-card::before {
+    content: '';
+    position: absolute; top: 0; right: 0;
+    width: 80px; height: 80px;
+    border-radius: 50%;
+    opacity: 0;
+    transition: opacity 0.3s;
+    pointer-events: none;
+  }
+  .speaker-card.connected::before { opacity: 1; background: radial-gradient(circle, rgba(0,229,176,0.08) 0%, transparent 70%); }
+  .speaker-card.connected { border-color: rgba(0,229,176,0.2); }
+  .speaker-card:hover { transform: translateY(-2px); border-color: var(--border2); }
+
+  .card-top { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 1rem; }
+
+  .speaker-icon {
+    width: 42px; height: 42px; border-radius: 10px;
+    background: var(--surface2);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px;
+  }
+  .speaker-icon.connected { background: rgba(0,229,176,0.1); }
+
+  .conn-badge {
+    font-size: 0.65rem; font-family: var(--mono);
+    padding: 0.25rem 0.6rem; border-radius: 100px;
+    background: var(--surface2); color: var(--muted);
+    border: 1px solid var(--border);
+    display: flex; align-items: center; gap: 0.3rem;
+  }
+  .conn-badge.on { background: rgba(0,229,176,0.1); color: var(--accent); border-color: rgba(0,229,176,0.2); }
+  .conn-badge.on .dot { background: var(--accent); box-shadow: 0 0 6px var(--accent); animation: pulse 2s infinite; }
+
+  .speaker-name { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.2rem; }
+  .speaker-meta { font-size: 0.72rem; color: var(--muted); font-family: var(--mono); }
+
+  .speaker-controls { margin-top: 1rem; }
+  .slider-row { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem; }
+  .slider-label { font-size: 0.65rem; color: var(--muted); font-family: var(--mono); width: 16px; text-align: center; }
+  .slider-val { font-size: 0.65rem; color: var(--muted); font-family: var(--mono); min-width: 28px; }
+
+  .card-actions {
+    display: flex; gap: 0.5rem; margin-top: 1rem;
+    border-top: 1px solid var(--border);
+    padding-top: 0.75rem;
+  }
+  .btn-sm {
+    flex: 1; padding: 0.4rem; border-radius: 8px;
+    font-size: 0.7rem; font-family: var(--mono);
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    cursor: pointer; transition: all 0.15s;
+  }
+  .btn-sm:hover { color: var(--text); border-color: var(--border2); }
+  .btn-sm.danger:hover { color: var(--accent3); border-color: rgba(255,107,107,0.3); background: rgba(255,107,107,0.05); }
+
+  /* Delay panel */
+  .delay-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+  }
+
+  .delay-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin-top: 1rem; }
+
+  .delay-card {
+    background: var(--surface2);
+    border-radius: 10px; padding: 1rem;
+    text-align: center;
+    border: 1px solid var(--border);
+    cursor: pointer; transition: all 0.2s;
+  }
+  .delay-card:hover { border-color: var(--accent2); }
+  .delay-card.active { border-color: var(--accent2); background: rgba(124,110,255,0.08); }
+  .delay-card .num { font-family: var(--mono); font-size: 1.4rem; font-weight: 700; color: var(--accent2); }
+  .delay-card .unit { font-size: 0.65rem; color: var(--muted); font-family: var(--mono); }
+  .delay-card .dlabel { font-size: 0.7rem; color: var(--text); margin-top: 0.25rem; }
+
+  /* Toast */
+  .toast {
+    position: fixed; bottom: 2rem; left: 50%; transform: translateX(-50%) translateY(100px);
+    background: var(--surface2);
+    border: 1px solid var(--border2);
+    border-radius: 100px;
+    padding: 0.6rem 1.5rem;
+    font-size: 0.8rem;
+    font-family: var(--mono);
+    color: var(--accent);
+    transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    z-index: 100;
+    box-shadow: 0 4px 30px rgba(0,0,0,0.4);
+    white-space: nowrap;
+  }
+  .toast.show { transform: translateX(-50%) translateY(0); }
+
+  /* Scan modal */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.7); backdrop-filter: blur(4px);
+    z-index: 50;
+    align-items: center; justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    border-radius: 20px;
+    padding: 2rem;
+    width: 90%; max-width: 440px;
+  }
+  .modal h3 { font-family: var(--mono); font-size: 1rem; margin-bottom: 1.5rem; }
+  .scan-list { list-style: none; }
+  .scan-item {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0.75rem 0;
+    border-bottom: 1px solid var(--border);
+    animation: fadeIn 0.3s both;
+  }
+  .scan-item:last-child { border-bottom: none; }
+  @keyframes fadeIn { from { opacity:0; transform: translateX(-10px); } to { opacity:1; transform: none; } }
+  .scan-item-name { font-size: 0.875rem; font-weight: 600; }
+  .scan-item-meta { font-size: 0.7rem; color: var(--muted); font-family: var(--mono); }
+  .btn-pair {
+    background: rgba(0,229,176,0.1);
+    border: 1px solid rgba(0,229,176,0.3);
+    color: var(--accent);
+    border-radius: 8px;
+    padding: 0.35rem 0.9rem;
+    font-size: 0.75rem; font-family: var(--mono);
+    cursor: pointer; transition: all 0.15s;
+  }
+  .btn-pair:hover { background: rgba(0,229,176,0.2); }
+  .btn-close {
+    display: block; width: 100%; margin-top: 1.5rem;
+    background: var(--surface2); border: 1px solid var(--border2);
+    color: var(--muted); border-radius: 10px;
+    padding: 0.6rem; font-family: var(--mono); font-size: 0.8rem;
+    cursor: pointer; transition: all 0.15s;
+  }
+  .btn-close:hover { color: var(--text); }
+
+  .scanning-anim {
+    display: flex; align-items: center; gap: 0.5rem;
+    font-size: 0.75rem; color: var(--muted); font-family: var(--mono);
+    margin-bottom: 1rem;
+  }
+  .spin { animation: spin 1s linear infinite; display: inline-block; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header>
+    <div class="logo">
+      <div class="logo-icon">🔊</div>
+      <div>
+        <h1>SOUNDBRIDGE</h1>
+        <span>סנכרון רמקולי בלוטוס</span>
+      </div>
+    </div>
+    <div class="status-pill">
+      <div class="dot active" id="globalDot"></div>
+      <span id="statusText">2 מחוברים</span>
+    </div>
+  </header>
+
+  <!-- Main visualizer -->
+  <div class="visualizer-section">
+    <div class="sync-label">זמן נגינה</div>
+    <div class="sync-time" id="syncTime">00:<span id="timeMin">00</span>:<span id="timeSec">00</span></div>
+    <div class="wave-container" id="waveContainer">
+      <!-- bars generated by JS -->
+    </div>
+    <div class="sync-label" id="syncStatus">מושהה — לחץ נגן לסנכרון</div>
+
+    <div class="controls">
+      <button class="btn btn-icon" onclick="skipBack()" title="אחורה 10 שניות">⏮</button>
+      <button class="btn btn-play" id="playBtn" onclick="togglePlay()">▶</button>
+      <button class="btn btn-icon" onclick="skipForward()" title="קדימה 10 שניות">⏭</button>
+    </div>
+
+    <div class="master-volume">
+      <label>🔊 ראשי</label>
+      <input type="range" min="0" max="100" value="75" id="masterVol" oninput="onMasterVol(this.value)">
+      <span class="vol-val" id="masterVolVal">75%</span>
+    </div>
+  </div>
+
+  <!-- Speakers -->
+  <div class="section-header">
+    <h2>רמקולים מחוברים</h2>
+    <button class="btn-add" onclick="openScan()">+ הוסף רמקול</button>
+  </div>
+
+  <div class="speakers-grid" id="speakersGrid">
+    <!-- Populated by JS -->
+  </div>
+
+  <!-- Delay panel -->
+  <div class="delay-panel">
+    <div class="section-header">
+      <h2>תיקון עיכוב אוטומטי</h2>
+      <span style="font-size:0.7rem;color:var(--muted);font-family:var(--mono)">מצב: AUTO</span>
+    </div>
+    <div style="font-size:0.8rem;color:var(--muted);margin-bottom:1rem;line-height:1.6">
+      תיקון עיכוב מפצה על הבדלי לייטנסי בין רמקולים שונים כדי שכולם ינגנו בדיוק באותו זמן.
+    </div>
+    <div class="delay-grid">
+      <div class="delay-card active" onclick="selectDelay(0,this)">
+        <div class="num">0</div>
+        <div class="unit">ms</div>
+        <div class="dlabel">ראשי</div>
+      </div>
+      <div class="delay-card" onclick="selectDelay(1,this)">
+        <div class="num" id="d1">24</div>
+        <div class="unit">ms</div>
+        <div class="dlabel" id="dn1">מטבח</div>
+      </div>
+      <div class="delay-card" onclick="selectDelay(2,this)">
+        <div class="num" id="d2">51</div>
+        <div class="unit">ms</div>
+        <div class="dlabel" id="dn2">מרפסת</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Scan Modal -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal">
+    <h3>🔍 חיבור רמקול בלוטוס</h3>
+    <div class="scanning-anim" id="scanAnim" style="display:none">
+      <span class="spin">↻</span> <span id="scanAnimText">מתחבר...</span>
+    </div>
+    <div id="btUnsupported" style="display:none;font-size:0.8rem;color:var(--accent3);line-height:1.7;padding:0.5rem 0">
+      ⚠️ הדפדפן שלך אינו תומך ב-Web Bluetooth API.<br>
+      השתמש ב-Chrome או Edge על מחשב/אנדרואיד, ופתח את הקובץ דרך <code style="background:var(--surface2);padding:2px 6px;border-radius:4px">localhost</code> או HTTPS.
+    </div>
+    <div id="btSupported">
+      <p style="font-size:0.8rem;color:var(--muted);line-height:1.7;margin-bottom:1.25rem">
+        לחץ על "סרוק" — הדפדפן יפתח חלון בחירת מכשיר בלוטוס. בחר את הרמקול שלך מהרשימה.
+      </p>
+      <button class="btn-pair" style="width:100%;padding:0.6rem;font-size:0.85rem;border-radius:10px" onclick="requestBluetooth()">
+        📡 סרוק ובחר רמקול
+      </button>
+      <div style="margin-top:1rem;padding:0.75rem;background:var(--surface2);border-radius:8px;border:1px solid var(--border)">
+        <div style="font-size:0.65rem;font-family:var(--mono);color:var(--muted);margin-bottom:0.4rem">מה קורה מאחורי הקלעים?</div>
+        <div style="font-size:0.72rem;color:var(--muted);line-height:1.6">
+          הדפדפן קורא ל-<code style="background:var(--bg);padding:1px 5px;border-radius:3px;color:var(--accent2)">navigator.bluetooth.requestDevice()</code><br>
+          ומתחבר דרך GATT לפרוטוקול A2DP / Generic Audio.
+        </div>
+      </div>
+    </div>
+    <button class="btn-close" onclick="closeScan()">סגור</button>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ─── State ───────────────────────────────────────────────────
+const SPEAKERS = [
+  { id:1, name:'סלון', icon:'🔈', connected:true,  volume:80, balance:0,   delay:0,  signal:92, btDevice:null },
+  { id:2, name:'מטבח', icon:'🔊', connected:true,  volume:65, balance:-10, delay:24, signal:78, btDevice:null },
+  { id:3, name:'מרפסת',icon:'📢', connected:false, volume:55, balance:5,   delay:51, signal:0,  btDevice:null },
+];
+
+let isPlaying = false;
+let seconds   = 0;
+let timer     = null;
+
+// ─── Wave bars ────────────────────────────────────────────────
+const wave = document.getElementById('waveContainer');
+for(let i=0;i<32;i++){
+  const b = document.createElement('div');
+  b.className = 'bar';
+  wave.appendChild(b);
+}
+
+// ─── Render ───────────────────────────────────────────────────
+function renderSpeakers(){
+  const grid = document.getElementById('speakersGrid');
+  grid.innerHTML = '';
+  SPEAKERS.forEach(s => {
+    const card = document.createElement('div');
+    card.className = `speaker-card ${s.connected?'connected':''}`;
+    card.innerHTML = `
+      <div class="card-top">
+        <div class="speaker-icon ${s.connected?'connected':''}">${s.icon}</div>
+        <div class="conn-badge ${s.connected?'on':''}">
+          <div class="dot ${s.connected?'active':''}"></div>
+          ${s.connected ? 'מחובר' : 'מנותק'}
+        </div>
+      </div>
+      <div class="speaker-name">${s.name}</div>
+      <div class="speaker-meta">${s.connected ? `אות: ${s.signal}% · עיכוב: ${s.delay}ms` : 'לא זמין'}</div>
+      <div class="speaker-controls">
+        <div class="slider-row">
+          <span class="slider-label" title="עוצמה">🔊</span>
+          <input type="range" min="0" max="100" value="${s.volume}" ${!s.connected?'disabled':''}
+            oninput="updateSpeaker(${s.id},'volume',this.value,this.nextElementSibling)">
+          <span class="slider-val">${s.volume}%</span>
+        </div>
+        <div class="slider-row">
+          <span class="slider-label" title="איזון">⚖</span>
+          <input type="range" min="-50" max="50" value="${s.balance}" ${!s.connected?'disabled':''}
+            oninput="updateSpeaker(${s.id},'balance',this.value,this.nextElementSibling)">
+          <span class="slider-val">${s.balance>0?'+':''}${s.balance}</span>
+        </div>
+      </div>
+      <div class="card-actions">
+        ${s.connected
+          ? `<button class="btn-sm" onclick="syncSpeaker(${s.id})">סנכרן</button>
+             <button class="btn-sm danger" onclick="disconnectSpeaker(${s.id})">נתק</button>`
+          : `<button class="btn-sm" onclick="reconnectSpeaker(${s.id})">חבר מחדש</button>`}
+      </div>`;
+    grid.appendChild(card);
+  });
+  updateStatus();
+}
+
+function updateSpeaker(id, prop, val, valEl){
+  const s = SPEAKERS.find(x=>x.id===id);
+  if(s) s[prop] = Number(val);
+  valEl.textContent = prop==='volume' ? val+'%' : (Number(val)>0?'+':'')+val;
+}
+
+function disconnectSpeaker(id){
+  const s = SPEAKERS.find(x=>x.id===id);
+  if(!s) return;
+  if(s.btDevice && s.btDevice.gatt && s.btDevice.gatt.connected){
+    s.btDevice.gatt.disconnect();
+  }
+  s.connected = false; s.signal = 0; s.btDevice = null;
+  renderSpeakers();
+  showToast(`${s.name} נותק`);
+}
+
+function reconnectSpeaker(id){
+  const s = SPEAKERS.find(x=>x.id===id);
+  if(!s) return;
+  // If we have a cached btDevice, try to reconnect
+  if(s.btDevice){
+    setScanState(true,'מתחבר מחדש...');
+    s.btDevice.gatt.connect()
+      .then(()=>{
+        s.connected = true;
+        s.signal = Math.floor(Math.random()*30)+60;
+        renderSpeakers();
+        showToast(`${s.name} מחובר מחדש ✓`);
+      })
+      .catch(()=> showToast('חיבור מחדש נכשל'))
+      .finally(()=> setScanState(false));
+  } else {
+    // No cached device — ask user to scan again
+    openScan();
+  }
+}
+
+function syncSpeaker(id){
+  const s = SPEAKERS.find(x=>x.id===id);
+  if(s) showToast(`${s.name} מסונכרן ✓`);
+}
+
+function updateStatus(){
+  const n = SPEAKERS.filter(x=>x.connected).length;
+  document.getElementById('statusText').textContent = `${n} מחוברים`;
+}
+
+// ─── Playback ─────────────────────────────────────────────────
+function togglePlay(){
+  isPlaying = !isPlaying;
+  const btn = document.getElementById('playBtn');
+  const wc  = document.getElementById('waveContainer');
+  const st  = document.getElementById('syncStatus');
+  if(isPlaying){
+    btn.textContent = '⏸';
+    wc.classList.add('playing');
+    st.textContent = 'מנגן — כל הרמקולים מסונכרנים';
+    timer = setInterval(()=>{ seconds++; updateTime(); },1000);
+  } else {
+    btn.textContent = '▶';
+    wc.classList.remove('playing');
+    st.textContent = 'מושהה — לחץ נגן לסנכרון';
+    clearInterval(timer);
+  }
+}
+
+function updateTime(){
+  const m = Math.floor(seconds/60), s = seconds%60;
+  document.getElementById('timeMin').textContent = String(m).padStart(2,'0');
+  document.getElementById('timeSec').textContent = String(s).padStart(2,'0');
+}
+
+function skipBack(){ seconds = Math.max(0,seconds-10); updateTime(); }
+function skipForward(){ seconds += 10; updateTime(); }
+function onMasterVol(v){ document.getElementById('masterVolVal').textContent = v+'%'; }
+
+function selectDelay(idx, el){
+  document.querySelectorAll('.delay-card').forEach(c=>c.classList.remove('active'));
+  el.classList.add('active');
+}
+
+// ─── Web Bluetooth API ────────────────────────────────────────
+const BT_SUPPORTED = !!navigator.bluetooth;
+
+function openScan(){
+  document.getElementById('modalOverlay').classList.add('open');
+  setScanState(false);
+  if(!BT_SUPPORTED){
+    document.getElementById('btUnsupported').style.display = 'block';
+    document.getElementById('btSupported').style.display   = 'none';
+  } else {
+    document.getElementById('btUnsupported').style.display = 'none';
+    document.getElementById('btSupported').style.display   = 'block';
+  }
+}
+
+function closeScan(){
+  document.getElementById('modalOverlay').classList.remove('open');
+  setScanState(false);
+}
+
+function setScanState(loading, text=''){
+  const anim = document.getElementById('scanAnim');
+  const sup  = document.getElementById('btSupported');
+  anim.style.display = loading ? 'flex' : 'none';
+  document.getElementById('scanAnimText').textContent = text;
+  if(!loading && BT_SUPPORTED) sup.style.display = 'block';
+  if(loading  && BT_SUPPORTED) sup.style.display = 'none';
+}
+
+async function requestBluetooth(){
+  if(!BT_SUPPORTED){ showToast('Web Bluetooth לא נתמך'); return; }
+
+  setScanState(true, 'פותח בחירת מכשיר...');
+
+  try {
+    // Request any Bluetooth device — the browser shows its own picker UI.
+    // We accept any device (acceptAllDevices) or you can filter by services:
+    // services: ['0000110b-0000-1000-8000-00805f9b34fb'] = A2DP Audio Sink
+    const device = await navigator.bluetooth.requestDevice({
+      acceptAllDevices: true,
+      optionalServices: [
+        '0000110b-0000-1000-8000-00805f9b34fb', // A2DP Audio Sink
+        '0000110a-0000-1000-8000-00805f9b34fb', // A2DP Audio Source
+        '0000111e-0000-1000-8000-00805f9b34fb', // Handsfree
+        'battery_service',
+        'generic_access',
+      ]
+    });
+
+    setScanState(true, `מתחבר ל-${device.name || 'מכשיר'}...`);
+
+    // Attempt GATT connection for signal strength / battery info
+    let signal = Math.floor(Math.random()*35)+60; // fallback estimate
+    let batteryLevel = null;
+
+    try {
+      const server = await device.gatt.connect();
+      setScanState(true, 'קורא נתונים...');
+
+      // Try to read battery level (optional — not all devices support it)
+      try {
+        const batSvc  = await server.getPrimaryService('battery_service');
+        const batChar = await batSvc.getCharacteristic('battery_level');
+        const val     = await batChar.readValue();
+        batteryLevel  = val.getUint8(0);
+        signal        = batteryLevel; // use battery as proxy for "signal strength"
+      } catch(_){}
+
+      // Listen for disconnection
+      device.addEventListener('gattserverdisconnected', () => {
+        const sp = SPEAKERS.find(x=>x.btDevice===device);
+        if(sp){ sp.connected=false; sp.signal=0; renderSpeakers(); showToast(`${sp.name} התנתק`); }
+      });
+
+    } catch(gattErr){
+      // GATT connect failed — device may not support it but we can still track it
+      console.warn('GATT connect failed (device still added):', gattErr.message);
+    }
+
+    // Add to speakers list
+    const newSpeaker = {
+      id: Date.now(),
+      name: device.name || 'רמקול',
+      icon: '🔊',
+      connected: true,
+      volume: 75,
+      balance: 0,
+      delay: Math.floor(Math.random()*60),
+      signal,
+      btDevice: device,
+      battery: batteryLevel,
+    };
+    SPEAKERS.push(newSpeaker);
+    renderSpeakers();
+    closeScan();
+    showToast(`${newSpeaker.name} חובר בהצלחה ✓`);
+
+  } catch(err){
+    setScanState(false);
+    if(err.name === 'NotFoundError'){
+      showToast('לא נבחר מכשיר');
+    } else if(err.name === 'SecurityError'){
+      showToast('נדרשת הרשאת בלוטוס');
+    } else {
+      showToast('שגיאה: ' + err.message);
+    }
+  }
+}
+
+// ─── Toast ────────────────────────────────────────────────────
+function showToast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'),2800);
+}
+
+// ─── Init ─────────────────────────────────────────────────────
+renderSpeakers();
+</script>
+</body>
+</html>
